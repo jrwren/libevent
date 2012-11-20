@@ -3809,17 +3809,26 @@ evhttp_request_get_host(struct evhttp_request *req)
 	return host;
 }
 
+/** Returns the remote port */
+int evhttp_request_get_remote_port(struct evhttp_request *req)
+{
+	return (req->remote_port);
+}
+
+/** Returns the request command */
 enum evhttp_cmd_type
 evhttp_request_get_command(const struct evhttp_request *req) {
 	return (req->type);
 }
 
+/** Returns the response code */
 int
 evhttp_request_get_response_code(const struct evhttp_request *req)
 {
 	return req->response_code;
 }
 
+/** Returns the response code line */
 const char *
 evhttp_request_get_response_code_line(const struct evhttp_request *req)
 {
@@ -3848,6 +3857,30 @@ struct evbuffer *evhttp_request_get_input_buffer(struct evhttp_request *req)
 struct evbuffer *evhttp_request_get_output_buffer(struct evhttp_request *req)
 {
 	return (req->output_buffer);
+}
+
+/** Returns the major version */
+int evhttp_request_get_version_major(struct evhttp_request *req)
+{
+	return (req->major);
+}
+
+/** Returns the minor version */
+int evhttp_request_get_version_minor(struct evhttp_request *req)
+{
+	return (req->minor);
+}
+
+/** Returns 0 if version is not before given major_v and minor_v http version*/
+int evhttp_request_version_before(struct evhttp_request *req, int major_v, int minor_v)
+{
+	return (REQ_VERSION_BEFORE(req, major_v, minor_v));
+}
+
+/** Returns 0 if version is not at least given major_v and minor_v http version*/
+int evhttp_request_version_atleast(struct evhttp_request *req, int major_v, int minor_v)
+{
+	return (REQ_VERSION_ATLEAST(req, major_v, minor_v));
 }
 
 
