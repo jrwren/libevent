@@ -600,8 +600,9 @@ const char *evhttp_request_get_uri(const struct evhttp_request *req);
 const struct evhttp_uri *evhttp_request_get_evhttp_uri(const struct evhttp_request *req);
 /** Returns the request command */
 enum evhttp_cmd_type evhttp_request_get_command(const struct evhttp_request *req);
-
+/** Returns the response code */
 int evhttp_request_get_response_code(const struct evhttp_request *req);
+/** Returns the response code line */
 const char * evhttp_request_get_response_code_line(const struct evhttp_request *req);
 
 /** Returns the input headers */
@@ -612,11 +613,21 @@ struct evkeyvalq *evhttp_request_get_output_headers(struct evhttp_request *req);
 struct evbuffer *evhttp_request_get_input_buffer(struct evhttp_request *req);
 /** Returns the output buffer */
 struct evbuffer *evhttp_request_get_output_buffer(struct evhttp_request *req);
+/** Returns the major version */
+int evhttp_request_get_version_major(struct evhttp_request *req);
+/** Returns the minor version */
+int evhttp_request_get_version_minor(struct evhttp_request *req);
+/** Returns 0 if version is not before given major_v and minor_v http version*/
+int evhttp_request_version_before(struct evhttp_request *req, int major_v, int minor_v);
+/** Returns 0 if version is not at least given major_v and minor_v http version*/
+int evhttp_request_version_atleast(struct evhttp_request *req, int major_v, int minor_v);
 /** Returns the host associated with the request. If a client sends an absolute
     URI, the host part of that is preferred. Otherwise, the input headers are
     searched for a Host: header. NULL is returned if no absolute URI or Host:
     header is provided. */
 const char *evhttp_request_get_host(struct evhttp_request *req);
+/** Returns the remote port */
+int evhttp_request_get_remote_port(struct evhttp_request *req);
 
 /* Interfaces for dealing with HTTP headers */
 
