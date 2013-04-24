@@ -5,7 +5,7 @@ dnl See LICENSE for copying information.
 dnl
 dnl Original version Dug Song <dugsong@monkey.org>
 
-AC_INIT(libevent,2.1.1-alpha-dev)
+AC_INIT(libevent,2.1.2-alpha-dev)
 AC_PREREQ(2.59)
 AC_CONFIG_SRCDIR(event.c)
 
@@ -13,8 +13,8 @@ AC_CONFIG_MACRO_DIR([m4])
 AM_INIT_AUTOMAKE
 dnl AM_SILENT_RULES req. automake 1.11.  [no] defaults V=1
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
-AM_CONFIG_HEADER(config.h  evconfig-private.h:evconfig-private.h.in)
-AC_DEFINE(NUMERIC_VERSION, 0x02010101, [Numeric representation of the version])
+AC_CONFIG_HEADERS(config.h  evconfig-private.h:evconfig-private.h.in)
+AC_DEFINE(NUMERIC_VERSION, 0x02010201, [Numeric representation of the version])
 
 dnl Initialize prefix.
 if test "$prefix" = "NONE"; then
@@ -362,6 +362,7 @@ AC_CHECK_FUNCS([ \
   usleep \
   vasprintf \
 ])
+AM_CONDITIONAL(STRLCPY_IMPL, [test x"$ac_cv_func_strlcpy" = xno])
 
 AC_CACHE_CHECK(
     [for getaddrinfo],
@@ -676,6 +677,14 @@ AC_CHECK_MEMBERS([struct in6_addr.s6_addr32, struct in6_addr.s6_addr16, struct s
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #endif
+#endif
+])
+
+AC_CHECK_TYPES([struct so_linger],
+[#define HAVE_SO_LINGER], ,
+[
+#ifdef HAVE_SYS_SOCKET_H
+#include <sys/socket.h>
 #endif
 ])
 

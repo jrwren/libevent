@@ -1406,8 +1406,95 @@ test_active_later(void *ptr)
 	tt_int_op(n_write_a_byte_cb, >, 100);
 	tt_int_op(n_read_and_drain_cb, >, 100);
 	tt_int_op(n_activate_other_event_cb, >, 100);
+
+	/* Now leave this one around, so that event_free sees it and removes
+	 * it. */
+	event_active_later_(&ev3, EV_READ);
+	event_base_assert_ok_(data->base);
+	event_base_free(data->base);
+	data->base = NULL;
 end:
 	;
+}
+
+
+static void incr_arg_cb(evutil_socket_t fd, short what, void *arg)
+{
+	int *intptr = arg;
+	(void) fd; (void) what;
+	++*intptr;
+}
+static void remove_timers_cb(evutil_socket_t fd, short what, void *arg)
+{
+	struct event **ep = arg;
+	(void) fd; (void) what;
+	event_remove_timer(ep[0]);
+	event_remove_timer(ep[1]);
+}
+static void send_a_byte_cb(evutil_socket_t fd, short what, void *arg)
+{
+	evutil_socket_t *sockp = arg;
+	(void) fd; (void) what;
+	write(*sockp, "A", 1);
+}
+struct read_not_timeout_param
+{
+	struct event **ev;
+	int events;
+	int count;
+};
+static void read_not_timeout_cb(evutil_socket_t fd, short what, void *arg)
+{
+	struct read_not_timeout_param *rntp = arg;
+	char c;
+	(void) fd; (void) what;
+	read(fd, &c, 1);
+	rntp->events |= what;
+	++rntp->count;
+	if(2 == rntp->count) event_del(rntp->ev[0]);
+}
+
+static void
+test_event_remove_timeout(void *ptr)
+{
+	struct basic_test_data *data = ptr;
+	struct event_base *base = data->base;
+	struct event *ev[5];
+	int ev1_fired=0;
+	struct timeval ms25 = { 0, 25*1000 },
+		ms40 = { 0, 40*1000 },
+		ms75 = { 0, 75*1000 },
+		ms125 = { 0, 125*1000 };
+	struct read_not_timeout_param rntp = { ev, 0, 0 };
+
+	event_base_assert_ok_(base);
+
+	ev[0] = event_new(base, data->pair[0], EV_READ|EV_PERSIST,
+	    read_not_timeout_cb, &rntp);
+	ev[1] = evtimer_new(base, incr_arg_cb, &ev1_fired);
+	ev[2] = evtimer_new(base, remove_timers_cb, ev);
+	ev[3] = evtimer_new(base, send_a_byte_cb, &data->pair[1]);
+	ev[4] = evtimer_new(base, send_a_byte_cb, &data->pair[1]);
+	tt_assert(base);
+	event_add(ev[2], &ms25); /* remove timers */
+	event_add(ev[4], &ms40); /* write to test if timer re-activates */
+	event_add(ev[0], &ms75); /* read */
+	event_add(ev[1], &ms75); /* timer */
+	event_add(ev[3], &ms125); /* timeout. */
+	event_base_assert_ok_(base);
+
+	event_base_dispatch(base);
+
+	tt_int_op(ev1_fired, ==, 0);
+	tt_int_op(rntp.events, ==, EV_READ);
+
+	event_base_assert_ok_(base);
+end:
+	event_free(ev[0]);
+	event_free(ev[1]);
+	event_free(ev[2]);
+	event_free(ev[3]);
+	event_free(ev[4]);
 }
 
 static void
@@ -2559,6 +2646,7 @@ struct testcase_t main_testcases[] = {
 	BASIC(bad_assign, TT_FORK|TT_NEED_BASE|TT_NO_LOGS),
 	BASIC(bad_reentrant, TT_FORK|TT_NEED_BASE|TT_NO_LOGS),
 	BASIC(active_later, TT_FORK|TT_NEED_BASE|TT_NEED_SOCKETPAIR),
+	BASIC(event_remove_timeout, TT_FORK|TT_NEED_BASE|TT_NEED_SOCKETPAIR),
 
 	/* These are still using the old API */
 	LEGACY(persistent_timeout, TT_FORK|TT_NEED_BASE),

@@ -426,7 +426,8 @@ event_base_update_cache_time(struct event_base *base)
 	}
 
 	EVBASE_ACQUIRE_LOCK(base, th_base_lock);
-	update_time_cache(base);
+	if (base->running_loop)
+		update_time_cache(base);
 	EVBASE_RELEASE_LOCK(base, th_base_lock);
 	return 0;
 }
@@ -1783,12 +1784,11 @@ static void
 event_once_cb(evutil_socket_t fd, short events, void *arg)
 {
 	struct event_once *eonce = arg;
-	struct event_base *base = eonce->ev.ev_base;
 
 	(*eonce->cb)(fd, events, eonce->arg);
-	EVBASE_ACQUIRE_LOCK(base, th_base_lock);
+	EVBASE_ACQUIRE_LOCK(eonce->ev.ev_base, th_base_lock);
 	LIST_REMOVE(eonce, next_once);
-	EVBASE_RELEASE_LOCK(base, th_base_lock);
+	EVBASE_RELEASE_LOCK(eonce->ev.ev_base, th_base_lock);
 	event_debug_unassign(&eonce->ev);
 	mm_free(eonce);
 }
@@ -2158,7 +2158,7 @@ evthread_notify_base_default(struct event_base *base)
 #else
 	r = write(base->th_notify_fd[1], buf, 1);
 #endif
-	return (r < 0 && errno != EAGAIN) ? -1 : 0;
+	return (r < 0 && ! EVUTIL_ERR_IS_EAGAIN(errno)) ? -1 : 0;
 }
 
 #ifdef EVENT__HAVE_EVENTFD
@@ -2191,6 +2191,46 @@ evthread_notify_base(struct event_base *base)
 		return 0;
 	base->is_notify_pending = 1;
 	return base->th_notify_fn(base);
+}
+
+/* Implementation function to remove a timeout on a currently pending event.
+ */
+int
+event_remove_timer_nolock_(struct event *ev)
+{
+	struct event_base *base = ev->ev_base;
+
+	EVENT_BASE_ASSERT_LOCKED(base);
+	event_debug_assert_is_setup_(ev);
+
+	event_debug(("event_remove_timer_nolock: event: %p", ev));
+
+	/* If it's not pending on a timeout, we don't need to do anything. */
+	if (ev->ev_flags & EVLIST_TIMEOUT) {
+		event_queue_remove_timeout(base, ev);
+		evutil_timerclear(&ev->ev_.ev_io.ev_timeout);
+	}
+
+	return (0);
+}
+
+int
+event_remove_timer(struct event *ev)
+{
+	int res;
+
+	if (EVUTIL_FAILURE_CHECK(!ev->ev_base)) {
+		event_warnx("%s: event has no event_base set.", __func__);
+		return -1;
+	}
+
+	EVBASE_ACQUIRE_LOCK(ev->ev_base, th_base_lock);
+
+	res = event_remove_timer_nolock_(ev);
+
+	EVBASE_RELEASE_LOCK(ev->ev_base, th_base_lock);
+
+	return (res);
 }
 
 /* Implementation function to add an event.  Works just like event_add,
@@ -2339,11 +2379,17 @@ event_add_nolock_(struct event *ev, const struct timeval *tv,
 				common_timeout_schedule(ctl, &now, ev);
 			}
 		} else {
+			struct event* top = NULL;
 			/* See if the earliest timeout is now earlier than it
 			 * was before: if so, we will need to tell the main
-			 * thread to wake up earlier than it would
-			 * otherwise. */
+			 * thread to wake up earlier than it would otherwise.
+			 * We double check the timeout of the top element to
+			 * handle time distortions due to system suspension.
+			 */
 			if (min_heap_elt_is_top_(ev))
+				notify = 1;
+			else if ((top = min_heap_top_(&base->timeheap)) != NULL &&
+					 evutil_timercmp(&top->ev_timeout, &now, <))
 				notify = 1;
 		}
 	}
@@ -3428,6 +3474,8 @@ event_global_setup_locks_(const int enable_locks)
 	EVTHREAD_SETUP_GLOBAL_LOCK(event_debug_map_lock_, 0);
 #endif
 	if (evsig_global_setup_locks_(enable_locks) < 0)
+		return -1;
+	if (evutil_global_setup_locks_(enable_locks) < 0)
 		return -1;
 	if (evutil_secure_rng_global_setup_locks_(enable_locks) < 0)
 		return -1;

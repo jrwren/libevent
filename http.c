@@ -193,8 +193,6 @@ static void evhttp_make_header(struct evhttp_connection *, struct evhttp_request
 static void evhttp_read_cb(struct bufferevent *, void *);
 static void evhttp_write_cb(struct bufferevent *, void *);
 static void evhttp_error_cb(struct bufferevent *bufev, short what, void *arg);
-static int evhttp_decode_uri_internal(const char *uri, size_t length,
-    char *ret, int decode_plus);
 static int evhttp_find_vhost(struct evhttp *http, struct evhttp **outhttp,
 		  const char *hostname);
 
@@ -1327,6 +1325,9 @@ evhttp_error_cb(struct bufferevent *bufev, short what, void *arg)
 	struct evhttp_connection *evcon = arg;
 	struct evhttp_request *req = TAILQ_FIRST(&evcon->requests);
 
+	if (evcon->fd == -1)
+		evcon->fd = bufferevent_getfd(bufev);
+
 	switch (evcon->state) {
 	case EVCON_CONNECTING:
 		if (what & BEV_EVENT_TIMEOUT) {
@@ -1392,6 +1393,9 @@ evhttp_connection_cb(struct bufferevent *bufev, short what, void *arg)
 	struct evhttp_connection *evcon = arg;
 	int error;
 	ev_socklen_t errsz = sizeof(error);
+
+	if (evcon->fd == -1)
+		evcon->fd = bufferevent_getfd(bufev);
 
 	if (!(what & BEV_EVENT_CONNECTED)) {
 		/* some operating systems return ECONNREFUSED immediately
@@ -1651,7 +1655,7 @@ evhttp_parse_request_line(struct evhttp_request *req, char *line)
 		break;
 	} /* switch */
 
-	if (type == EVHTTP_REQ_UNKNOWN_) {
+	if ((int)type == EVHTTP_REQ_UNKNOWN_) {
 	        event_debug(("%s: bad method %s on request %p from %s",
 			__func__, method, req, req->remote_host));
                 /* No error yet; we'll give a better error later when
@@ -2324,6 +2328,8 @@ evhttp_connection_get_peer(struct evhttp_connection *evcon,
 int
 evhttp_connection_connect_(struct evhttp_connection *evcon)
 {
+	int old_state = evcon->state;
+
 	if (evcon->state == EVCON_CONNECTING)
 		return (0);
 
@@ -2332,16 +2338,21 @@ evhttp_connection_connect_(struct evhttp_connection *evcon)
 	EVUTIL_ASSERT(!(evcon->flags & EVHTTP_CON_INCOMING));
 	evcon->flags |= EVHTTP_CON_OUTGOING;
 
-	evcon->fd = bind_socket(
-		evcon->bind_address, evcon->bind_port, 0 /*reuse*/);
-	if (evcon->fd == -1) {
-		event_debug(("%s: failed to bind to \"%s\"",
-			__func__, evcon->bind_address));
-		return (-1);
+	if (evcon->bind_address || evcon->bind_port) {
+		evcon->fd = bind_socket(
+			evcon->bind_address, evcon->bind_port, 0 /*reuse*/);
+		if (evcon->fd == -1) {
+			event_debug(("%s: failed to bind to \"%s\"",
+				__func__, evcon->bind_address));
+			return (-1);
+		}
+
+		bufferevent_setfd(evcon->bufev, evcon->fd);
+	} else {
+		bufferevent_setfd(evcon->bufev, -1);
 	}
 
 	/* Set up a callback for successful connection setup */
-	bufferevent_setfd(evcon->bufev, evcon->fd);
 	bufferevent_setcb(evcon->bufev,
 	    NULL /* evhttp_read_cb */,
 	    NULL /* evhttp_write_cb */,
@@ -2356,8 +2367,11 @@ evhttp_connection_connect_(struct evhttp_connection *evcon)
 	/* make sure that we get a write callback */
 	bufferevent_enable(evcon->bufev, EV_WRITE);
 
+	evcon->state = EVCON_CONNECTING;
+
 	if (bufferevent_socket_connect_hostname(evcon->bufev, evcon->dns_base,
 		AF_UNSPEC, evcon->address, evcon->port) < 0) {
+		evcon->state = old_state;
 		event_sock_warn(evcon->fd, "%s: connection to \"%s\" failed",
 		    __func__, evcon->address);
 		/* some operating systems return ECONNREFUSED immediately
@@ -2367,8 +2381,6 @@ evhttp_connection_connect_(struct evhttp_connection *evcon)
 		evhttp_connection_cb_cleanup(evcon);
 		return (0);
 	}
-
-	evcon->state = EVCON_CONNECTING;
 
 	return (0);
 }
@@ -2405,17 +2417,17 @@ evhttp_make_request(struct evhttp_connection *evcon,
 	req->evcon = evcon;
 	EVUTIL_ASSERT(!(req->flags & EVHTTP_REQ_OWN_CONNECTION));
 
-       TAILQ_INSERT_TAIL(&evcon->requests, req, next);
+	TAILQ_INSERT_TAIL(&evcon->requests, req, next);
 
 	/* If the connection object is not connected; make it so */
 	if (!evhttp_connected(evcon)) {
 		int res = evhttp_connection_connect_(evcon);
-	       /* evhttp_connection_fail_(), which is called through
-		* evhttp_connection_connect_(), assumes that req lies in
-		* evcon->requests.  Thus, enqueue the request in advance and r
-		* it in the error case. */
-	       if (res != 0)
-		       TAILQ_REMOVE(&evcon->requests, req, next);
+		/* evhttp_connection_fail_(), which is called through
+		 * evhttp_connection_connect_(), assumes that req lies in
+		 * evcon->requests.  Thus, enqueue the request in advance and
+		 * remove it in the error case. */
+		if (res != 0)
+			TAILQ_REMOVE(&evcon->requests, req, next);
 
 		return res;
 	}
@@ -2859,7 +2871,7 @@ evhttp_encode_uri(const char *str)
  *     a ?.  -1 is deprecated.
  * @return the number of bytes written to 'ret'.
  */
-static int
+int
 evhttp_decode_uri_internal(
 	const char *uri, size_t length, char *ret, int decode_plus_ctl)
 {
@@ -2875,8 +2887,8 @@ evhttp_decode_uri_internal(
 				decode_plus = 1;
 		} else if (c == '+' && decode_plus) {
 			c = ' ';
-		} else if (c == '%' && EVUTIL_ISXDIGIT_(uri[i+1]) &&
-		    EVUTIL_ISXDIGIT_(uri[i+2])) {
+		} else if ((i + 2) < length && c == '%' &&
+			EVUTIL_ISXDIGIT_(uri[i+1]) && EVUTIL_ISXDIGIT_(uri[i+2])) {
 			char tmp[3];
 			tmp[0] = uri[i+1];
 			tmp[1] = uri[i+2];
