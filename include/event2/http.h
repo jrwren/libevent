@@ -207,6 +207,17 @@ void evhttp_set_max_headers_size(struct evhttp* http, ev_ssize_t max_headers_siz
 void evhttp_set_max_body_size(struct evhttp* http, ev_ssize_t max_body_size);
 
 /**
+  Set the value to use for the Content-Type header when none was provided. If
+  the content type string is NULL, the Content-Type header will not be
+  automatically added.
+
+  @param http the http server on which to set the default content type
+  @param content_type the value for the Content-Type header
+*/
+void evhttp_set_default_content_type(struct evhttp *http,
+	const char *content_type);
+
+/**
   Sets the what HTTP methods are supported in requests accepted by this
   server, and passed to user callbacks.
 
@@ -453,6 +464,11 @@ struct evhttp_connection *evhttp_connection_base_bufferevent_new(
 struct bufferevent* evhttp_connection_get_bufferevent(struct evhttp_connection *evcon);
 
 /**
+ * Return the HTTP server associated with this connection, or NULL.
+ */
+struct evhttp *evhttp_connection_get_server(struct evhttp_connection *evcon);
+
+/**
  * Creates a new request object that needs to be filled in with the request
  * parameters.  The callback is executed when the request completed or an
  * error occurred.
@@ -469,6 +485,47 @@ struct evhttp_request *evhttp_request_new(
  */
 void evhttp_request_set_chunked_cb(struct evhttp_request *,
     void (*cb)(struct evhttp_request *, void *));
+
+/**
+ * The different error types supported by evhttp
+ *
+ * @see evhttp_request_set_error_cb()
+ */
+enum evhttp_request_error {
+  /**
+   * Timeout reached, also @see evhttp_connection_set_timeout()
+   */
+  EVREQ_HTTP_TIMEOUT,
+  /**
+   * EOF reached
+   */
+  EVREQ_HTTP_EOF,
+  /**
+   * Error while reading header, or invalid header
+   */
+  EVREQ_HTTP_INVALID_HEADER,
+  /**
+   * Error encountered while reading or writing
+   */
+  EVREQ_HTTP_BUFFER_ERROR,
+  /**
+   * The evhttp_cancel_request() called on this request.
+   */
+  EVREQ_HTTP_REQUEST_CANCEL,
+  /**
+   * Body is greater then evhttp_connection_set_max_body_size()
+   */
+  EVREQ_HTTP_DATA_TOO_LONG
+};
+/**
+ * Set a callback for errors
+ * @see evhttp_request_error for error types.
+ *
+ * On error, both the error callback and the regular callback will be called,
+ * error callback is called before the regular callback.
+ **/
+void evhttp_request_set_error_cb(struct evhttp_request *,
+    void (*)(enum evhttp_request_error, void *));
 
 /** Frees the request object and removes associated events. */
 void evhttp_request_free(struct evhttp_request *req);
@@ -556,6 +613,15 @@ void evhttp_connection_set_closecb(struct evhttp_connection *evcon,
 /** Get the remote address and port associated with this connection. */
 void evhttp_connection_get_peer(struct evhttp_connection *evcon,
     char **address, ev_uint16_t *port);
+
+/** Get the remote address associated with this connection.
+ * extracted from getpeername().
+ *
+ * @return NULL if getpeername() return non success,
+ * or connection is not connected,
+ * otherwise it return pointer to struct sockaddr_storage */
+const struct sockaddr*
+evhttp_connection_get_addr(struct evhttp_connection *evcon);
 
 /**
     Make an HTTP request over the specified connection.

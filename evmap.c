@@ -375,9 +375,11 @@ evmap_io_del_(struct event_base *base, evutil_socket_t fd, struct event *ev)
 
 	if (res) {
 		void *extra = ((char*)ctx) + sizeof(struct evmap_io);
-		if (evsel->del(base, ev->ev_fd, old, res, extra) == -1)
-			return (-1);
-		retval = 1;
+		if (evsel->del(base, ev->ev_fd, old, res, extra) == -1) {
+			retval = -1;
+		} else {
+			retval = 1;
+		}
 	}
 
 	ctx->nread = nread;
@@ -580,7 +582,7 @@ evmap_io_reinit_iter_fn(struct event_base *base, evutil_socket_t fd,
 	extra = ((char*)ctx) + sizeof(struct evmap_io);
 	if (ctx->nread)
 		events |= EV_READ;
-	if (ctx->nread)
+	if (ctx->nwrite)
 		events |= EV_WRITE;
 	if (evsel->fdinfo_len)
 		memset(extra, 0, evsel->fdinfo_len);
