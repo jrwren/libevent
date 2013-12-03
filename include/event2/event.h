@@ -54,7 +54,7 @@
 
   @section usage Standard usage
 
-  Every program that uses Libevent must inclurde the <event2/event.h>
+  Every program that uses Libevent must include the <event2/event.h>
   header, and pass the -levent flag to the linker.  (You can instead link
   -levent_core if you only want the main event and buffered IO-based code,
   and don't want to link any protocol code.)
@@ -124,9 +124,11 @@
   @section timers Timers
 
   Libevent can also be used to create timers that invoke a callback after a
-  certain amount of time has expired. The evtimer_new() function returns
+  certain amount of time has expired. The evtimer_new() macro returns
   an event struct to use as a timer. To activate the timer, call
   evtimer_add(). Timers can be deactivated by calling evtimer_del().
+  (These macros are thin wrappers around event_new(), event_add(),
+  and event_del(); you can also use those instead.)
 
   @section evdns Asynchronous DNS resolution
 
@@ -1133,8 +1135,8 @@ int event_base_once(struct event_base *, evutil_socket_t, short, event_callback_
 /**
   Add an event to the set of pending events.
 
-  The function event_add() schedules the execution of the ev event when the
-  event specified in event_assign()/event_new() occurs, or when the time
+  The function event_add() schedules the execution of the event 'ev' when the
+  condition specified by event_assign() or event_new() occurs, or when the time
   specified in timeout has elapesed.  If atimeout is NULL, no timeout
   occurs and the function will only be
   called if a matching event occurs.  The event in the
