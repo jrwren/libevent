@@ -2422,6 +2422,7 @@ evhttp_connection_connect_(struct evhttp_connection *evcon)
 		evhttp_connection_cb_cleanup(evcon);
 		return (0);
 	}
+	bufferevent_set_timeouts(evcon->bufev, &evcon->timeout, &evcon->timeout);
 
 	return (0);
 }
